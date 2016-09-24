@@ -9,11 +9,11 @@ import java.util.*;
 
 public class Player implements pentos.sim.Player {
 
-    private Random gen = new Random();
+    private Random gen;
     private Set<Cell> road_cells = new HashSet<Cell>();
 
     public void init() { // function is called once at the beginning before play is called
-
+	gen = new Random();
     }
     
     public Move play(Building request, Land land) {
@@ -62,25 +62,27 @@ public class Player implements pentos.sim.Player {
 	Set<Cell> output = new HashSet<Cell>();
 	boolean[][] checked = new boolean[land.side][land.side];
 	Queue<Cell> queue = new LinkedList<Cell>();
+	// add border cells that don't have a road currently
+	Cell source = new Cell(Integer.MAX_VALUE,Integer.MAX_VALUE); // dummy cell to serve as road connector to perimeter cells
+	for (int z=0; z<land.side; z++) {
+	    if (b.contains(new Cell(0,z)) || b.contains(new Cell(z,0)) || b.contains(new Cell(land.side-1,z)) || b.contains(new Cell(z,land.side-1))) //if already on border don't build any roads
+		return output;
+	    if (land.unoccupied(0,z))
+		queue.add(new Cell(0,z,source));
+	    if (land.unoccupied(z,0))
+		queue.add(new Cell(z,0,source));
+	    if (land.unoccupied(z,land.side-1))
+		queue.add(new Cell(z,land.side-1,source));
+	    if (land.unoccupied(land.side-1,z))
+		queue.add(new Cell(land.side-1,z,source));
+	}
 	// add cells adjacent to current road cells
 	for (Cell p : road_cells) {
 	    for (Cell q : p.neighbors()) {
 		if (!road_cells.contains(q) && land.unoccupied(q) && !b.contains(q)) 
 		    queue.add(new Cell(q.i,q.j,p)); // use tail field of cell to keep track of previous road cell during the search
 	    }
-	}      
-	// add border cells that don't have a road currently
-	Cell source = new Cell(Integer.MAX_VALUE,Integer.MAX_VALUE); // dummy cell to serve as road connector to perimeter cells
-	for (int z=0; z<land.side; z++) {
-	    if (land.unoccupied(0,z) && !b.contains(new Cell(0,z)))
-		queue.add(new Cell(0,z,source));
-	    if (land.unoccupied(z,0) && !b.contains(new Cell(z,0)))
-		queue.add(new Cell(z,0,source));
-	    if (land.unoccupied(z,land.side-1) && !b.contains(new Cell(z,land.side-1)))
-		queue.add(new Cell(z,land.side-1,source));
-	    if (land.unoccupied(land.side-1,z) && !b.contains(new Cell(land.side-1,z)))
-		queue.add(new Cell(land.side-1,z,source));
-	}
+	}	
 	while (!queue.isEmpty()) {
 	    Cell p = queue.remove();
 	    checked[p.i][p.j] = true;
@@ -122,17 +124,18 @@ public class Player implements pentos.sim.Player {
 	if (adjCells.isEmpty())
 	    return new HashSet<Cell>();
 	Cell tail = adjCells.get(gen.nextInt(adjCells.size()));
-	output.add(tail);
-	for (int i=0; i<n; i++) {
+	for (int ii=0; ii<n; ii++) {
 	    ArrayList<Cell> walk_cells = new ArrayList<Cell>();
 	    for (Cell p : tail.neighbors()) {
-		if (!b.contains(p) && !marked.contains(p) && land.unoccupied(p))
+		if (!b.contains(p) && !marked.contains(p) && land.unoccupied(p) && !output.contains(p))
 		    walk_cells.add(p);		
 	    }
-	    if (walk_cells.isEmpty())
+	    if (walk_cells.isEmpty()) {
+		//return output; //if you want to build it anyway
 		return new HashSet<Cell>();
+	    }
+	    output.add(tail);	    
 	    tail = walk_cells.get(gen.nextInt(walk_cells.size()));
-	    output.add(tail);
 	}
 	return output;
     }

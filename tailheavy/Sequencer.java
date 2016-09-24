@@ -1,4 +1,4 @@
-package pentos.random;
+package pentos.tailheavy;
 
 import java.util.*;
 import pentos.sim.Building;
@@ -36,12 +36,12 @@ public class Sequencer implements pentos.sim.Sequencer {
 	return new Building(residence.toArray(new Cell[residence.size()]), Building.Type.RESIDENCE);
     }    
 
-    private Building randomFactory() { // random rectangle with side length between 2 and 5 inclusive
+    private Building randomFactory() { // random rectangle with side lengths biased towards 1 or 5
 	Set<Cell> factory = new HashSet<Cell>();
-	int width = gen.nextInt(3);
-	int height = gen.nextInt(3);
-	for (int i=0; i<width+2; i++) {
-	    for (int j=0; j<height+2; j++) {
+	int width = ((int)Math.round(Math.floor(Math.pow(gen.nextDouble(),2) / 0.2)) + 4) % 5 + 1;
+	int height = ((int)Math.round(Math.floor(Math.pow(gen.nextDouble(),2) / 0.2)) + 4) % 5 + 1;
+	for (int i=0; i<width; i++) {
+	    for (int j=0; j<height; j++) {
 		factory.add(new Cell(i,j));
 	    }
 	}

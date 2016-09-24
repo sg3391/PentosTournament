@@ -1,0 +1,53 @@
+g1
+factories at bottommost location, residences at topmost location, building parks/ponds using random walks.
+top/bottommost row is chosen, ties broken horizonally by choosing leftmost
+
+g2
+appears very similar to g1. 
+
+the default shortest path road building algorithm produces roads with lots of sharp turns around other structures.
+Jingyu suggests that cells are wasted when a road turns because the perimeter of turning roads is less than of straight roads
+
+g3
+same code but without ponds/parks
+
+Adam: the default random ponds/parks produced approximately +100 point advantage over no ponds/parks, averaged over 10 runs
+Michael: buildings are worth less than 1 point per cell because they require road cells which do not give points
+Jullian: can measure points per cell value of buildings/ponds/parks while the player is running and make decisions based on online measurements rather than predetermined thresholds
+Michael: road to a new building should not touch existing buildings that are already connected
+
+g4
+preallocates roads leaving vertical space of 5 cells between, with one of 2 cells
+
+g5
+diagonal separation of residences/factories, no parks or ponds
+
+Adam suggests that residences placed on the border should be placed with parks/ponds, and to anticipate with each building whether it will be on the border
+
+g6
+allocates space for factories of each side length
+fills in space with water/park to create convex shapes regardless of whether a pond/park is created or not
+
+Lou suggests parks/ponds can be extended by fewer than 4 cells to reach adjacent residences rather than creating new parks/ponds
+
+
+g8
+similar top/bottom separation. using only parks or only ponds appeared to be better than using both, at least using the default random park/pond generator and placing both down at the same time
+
+Avidan: if only using parks, replacing a single park with a pond would never decrease the score but can possibly increase the score
+Lou: should alternate between building parks and ponds
+
+g9
+similar top/bottom separation
+
+the professor suggests that size-5 empty spaces should be top priority placement location for any residence which comes in with that shape
+
+
+g10 
+only uses adjacent cells to currently built buildings as candidate locations for future buildings of the same type so that buildings are packed closely together
+seems to place unecessarily many roads
+
+
+
+Deliverable for next Monday:
+try to improve upon default road/park/pond generators
