@@ -1,380 +1,545 @@
 package pentos.g4;
+//reference g1 version 9/26
+import java.util.*;
+import java.io.*;
 
-import pentos.sim.Cell;
 import pentos.sim.Building;
+import pentos.sim.Cell;
 import pentos.sim.Land;
 import pentos.sim.Move;
 
-import java.util.*;
-
 public class Player implements pentos.sim.Player {
-
-	//put factories on top, residences on bottom;
-	//bulid a wall after leaving room of 5 cells on each side
-	//for each round iterate through all possible placements near left side
-	//find the placement that leaves the fewest space
-
-	private int factory_level;
-	private int residence_level;
-    private int left_min;
-    private boolean road_built;
-    private Set<Cell> road_neighbors;
-    private Set<Cell> roads;
-    private Set<Cell> visited;
-
-	public void init() { // function is called once at the beginning before play is called
-		this.factory_level = 0;
-		this.residence_level = 0;
-        this.left_min = Integer.MAX_VALUE;
-        this.road_built = false;
-        this.road_neighbors = new HashSet<Cell>();
-        this.visited = new HashSet<Cell>();
+                            
+     //                        empty residence factory p/w side  road  firstroad  first_factory      divide100
+    private int[] factory_to = {0,   0,       1,      0,   1,    1,         1,       3,                300};
+    //                        empty residence factory p/w  side  road  firstroad  firstpark/first water divide
+    private int[] residence_to = {0,    4,      0,      4,  2,    3,         0,                 7,      500};
+    private int[] waterpark_to = {-3,    0,       3,     -1,   -1,   -4};
+    private Random gen = new Random();
+    final int ITERATION_COUNT = 200;
+    final int side = 50;
+    private boolean[][] isDisconnected;
+    private Set<Cell> road_cells = new HashSet<Cell>();
+    static int count = 0;
+    private boolean stop = false;
+    public void init() {
+        isDisconnected = new boolean[side][side];
+        //getParameters();
+        // for (int tmp :factory_to ) {
+        //     System.out.print(tmp);
+        //     System.out.print(" ");
+        // }
     }
 
-    public void print(Move m){
-        System.out.println("location: " + m.location.toString());
-        System.out.println("building: " + m.request.rotations()[m.rotation].toString());
-        System.out.println("rotation: " + Integer.toString(m.rotation));
-        System.out.println("water: ");
-        for(Cell w:m.water){
-            System.out.print(w.toString());
+    public void getParameters(){
+        try{
+         FileReader fileReader = new FileReader("/Users/luyang/Documents/eclipse_workspace/parameters");
+         BufferedReader bufferedReader = new BufferedReader(fileReader);
+         String line = null;
+         line = bufferedReader.readLine();
+         String[] arr = line.split(",");
+         for (int i = 0; i < arr.length ;i++ ) {
+             this.factory_to[i] = Integer.parseInt(arr[i]);
+         }
+         line = bufferedReader.readLine();
+         arr = line.split(",");
+         for (int i = 0; i < arr.length ;i++ ) {
+             this.residence_to[i] = Integer.parseInt(arr[i]);
+         }
+         line = bufferedReader.readLine();
+         arr = line.split(",");
+         for (int i = 0; i < arr.length ;i++ ) {
+             this.waterpark_to[i] = Integer.parseInt(arr[i]);
+         }
+         bufferedReader.close();
         }
-        System.out.println();
-        System.out.println("park: ");
-        for(Cell p:m.park){
-            System.out.print(p.toString());
+        catch(FileNotFoundException ex) {
+            System.out.println(
+                "Unable to open file");                
         }
-        System.out.println();
+        catch(IOException ex) {
+            System.out.println(
+                "Error reading file");                  
+            // Or we could just do this: 
+            // ex.printStackTrace();
+        }
     }
 
+    public Move getBestMove(Building request, Land land) {
+        Building[] rotations = request.rotations();
+        int best_i = land.side + 1,
+            best_j = land.side + 1;
+        int best_perimeter = -1;
+        Move best_move = null;
+        
+        
 
+
+        //find first free location row by row
+        if(request.type == Building.Type.RESIDENCE) {
+            best_i = land.side + 1;
+            best_j = land.side + 1;
+            
+            for (int i = 0; i < land.side; ++i) 
+            for (int j = 0; j < land.side; ++j) {
+                Cell p = new Cell(i,j);
+                for (int ri = 0; ri < rotations.length; ++ri)
+                if(land.buildable(rotations[ri], p)) {
+                    Move temp = new Move(true, 
+                                request, 
+                                p, 
+                                ri, 
+                                new HashSet<Cell>(), 
+                                new HashSet<Cell>(), 
+                                new HashSet<Cell>());
+                    boolean disconnected = false;
+                    Set<Cell> shiftedCells = new HashSet<Cell>();
+                    for (Cell x : temp.request.rotations()[temp.rotation]) {
+                        shiftedCells.add(
+                                new Cell(x.i+temp.location.i,
+                                        x.j+temp.location.j));
+                        disconnected |= 
+                                isDisconnected[x.i + temp.location.i][x.j + temp.location.j];
+                    }
+                        
+
+                    int perimeter = 0;
+                    boolean first_resident_or_wp = true, first_road = true;
+                    
+                    for(Cell x : shiftedCells) {
+                        for(Cell y : x.neighbors()) {
+                            if (shiftedCells.contains(y)) {
+                                continue;
+                            }
+                            // if (land.land[y.i][y.j].isFactory()) {
+                            //  perimeter+=2;
+                            // }
+                            Cell.Type t = land.getCellType(y.i,y.j);
+                            if (t == Cell.Type.EMPTY) {
+                                perimeter+=residence_to[0];
+                            }
+                            if (t == Cell.Type.ROAD) {
+                                perimeter+=residence_to[5];
+                                if(first_road) {
+                                    perimeter += residence_to[6];
+                                    first_road = false;
+                                }
+                            }
+                            if (t == Cell.Type.RESIDENCE) {
+                                perimeter+=residence_to[1];
+                            }
+                            if (t == Cell.Type.WATER || t == Cell.Type.PARK) {
+                                perimeter+=residence_to[3];
+                            }
+                            if(first_resident_or_wp && (t == Cell.Type.WATER || t == Cell.Type.PARK || t == Cell.Type.RESIDENCE) ){
+                                if (first_resident_or_wp) {
+                                    first_resident_or_wp= false;
+                                    perimeter+=residence_to[7];
+                                }
+                            }
+                        }
+                        if(x.i == 0 || x.i == land.side - 1) {
+                            perimeter+=residence_to[4];
+                            if(first_road) {
+                                perimeter += residence_to[6];
+                                first_road = false;
+                            }
+                            
+                        }
+                        if(x.j == 0 || x.j == land.side - 1) {
+                            perimeter+=residence_to[4];
+                            if(first_road) {
+                                perimeter += residence_to[6];
+                                first_road = false;
+                            }
+                        }
+                    }
+                    
+                    
+                    // builda road to connect this building to perimeter
+                    
+                    if(!disconnected && ((perimeter > best_perimeter)
+                            ||(perimeter==best_perimeter && (i  + j) < best_i +  best_j)
+                            || (perimeter==best_perimeter && (i  + j) ==  best_i + best_j) && Math.abs(i-j) < Math.abs(best_i - best_j))) {
+                        List<Set<Cell>> roadCells_list = findShortestRoad(shiftedCells, land);
+                        if(roadCells_list != null) {
+                            best_move = temp;
+                            best_i = i;
+                            best_j = j;
+                            best_perimeter = perimeter;
+                        } else {
+                            for(Cell x : shiftedCells) {
+                                isDisconnected[x.i][x.j] = true;
+                            }
+                        }
+                    }               
+                }
+            }
+        //find closest free location to end
+        } else if(request.type == Building.Type.FACTORY) {
+            best_i = -1;
+            best_j = -1;
+            best_perimeter = -1;
+            for (int i = land.side - 1; i >= 0; --i) 
+            for ( int j = land.side - 1; j >= 0; --j) {
+                Cell p = new Cell(i,j);
+                for (int ri = 0; ri < rotations.length; ++ri)
+                if(land.buildable(rotations[ri], p)) {
+                    Move temp = new Move(true, 
+                                request, 
+                                p, 
+                                ri, 
+                                new HashSet<Cell>(), 
+                                new HashSet<Cell>(), 
+                                new HashSet<Cell>());
+                    
+                    boolean disconnected = false;
+                    Set<Cell> shiftedCells = new HashSet<Cell>();
+                    for (Cell x : temp.request.rotations()[temp.rotation]) {
+                        shiftedCells.add(
+                                new Cell(x.i+temp.location.i,
+                                        x.j+temp.location.j));
+                        disconnected |= 
+                                isDisconnected[x.i + temp.location.i][x.j + temp.location.j];
+                    }
+                    
+                    int perimeter = 0;
+                    boolean first_factory = true;
+                    
+                    for(Cell x : shiftedCells) {
+                        for(Cell y : x.neighbors()) {
+                            if (shiftedCells.contains(y)) {
+                                continue;
+                            }
+                            Cell.Type t = land.getCellType(y.i,y.j);
+                            if (t == Cell.Type.EMPTY) {
+                                perimeter+=factory_to[0];
+                            }
+                            if (t == Cell.Type.FACTORY) {
+                                perimeter+=factory_to[2];
+                                if(first_factory){
+                                    first_factory =false;
+                                    perimeter+=factory_to[7];
+                                }
+                            }
+                            if (t == Cell.Type.ROAD) {
+                                perimeter+=factory_to[6];
+                            }
+                            // if (land.land[y.i][y.j].isWater()) {
+                            //  perimeter+=2;
+                            // }
+                            // if (land.land[y.i][y.j].isPark()) {
+                            //  perimeter+=2;
+                            // }
+
+                        }
+                        if(x.i == 0 || x.i == land.side - 1) perimeter+=factory_to[4];
+                        if(x.j == 0 || x.j == land.side - 1) perimeter+=factory_to[4];                      
+                    }
+
+                    Set<Cell> neighbors_one = new HashSet<Cell>(shiftedCells);
+                    neighbors_one.addAll(getNeighbors(shiftedCells,land));
+                    Set<Cell> neighbors_two = getNeighbors(neighbors_one,land);
+                    for(Cell n:neighbors_two){
+                        if(land.getCellType(n.i,n.j) == Cell.Type.RESIDENCE) perimeter -= 10;
+                    }
+                    
+                    // builda road to connect this building to perimeter
+                    if(!disconnected && (perimeter > best_perimeter 
+                            || (perimeter==best_perimeter && (i  + j) >  best_i + best_j))
+                            ||(perimeter==best_perimeter && (i  + j) ==  best_i + best_j) && Math.abs(i-j) < Math.abs(best_i - best_j)) {
+                        List<Set<Cell>> roadCells_list = findShortestRoad(shiftedCells, land);
+                        if(roadCells_list != null) {
+                            best_move = temp;
+                            best_i = i;
+                            best_j = j;
+                            best_perimeter = perimeter;
+                        } else {
+                            for(Cell x : shiftedCells) {
+                                isDisconnected[x.i][x.j] = true;
+                            }
+                        }
+                    }                   
+                }
+            }    
+        }
+        return best_move;
+    }
+
+    private static int num = 0;
+    static Set<Cell> prev_water=null;
     public Move play(Building request, Land land) {
-        //System.out.println("Play started");
-        //System.out.println("====================");
-        //System.out.println("factory? " + (request.type == Building.Type.FACTORY));
-    	Move m = new Move(false);
-        if(!road_built){
-            buildRoad(land.side);
-            m.road = roads;
-            road_built = true;
-
+        Move best_move = getBestMove(request, land);
+        if (best_move == null) {
+            //`m.out.println("no moves");
+            stop = true;
+            return new Move(false);
         }
-        else{
-            m.road = new HashSet<Cell>();
+        // get coordinates of building placement (position plus local building cell coordinates)
+        Set<Cell> shiftedCells = new HashSet<Cell>();
+        for (Cell x : best_move.request.rotations()[best_move.rotation]) {
+            shiftedCells.add(
+                    new Cell(x.i+best_move.location.i,
+                            x.j+best_move.location.j));
+            //System.out.println(x.i + " " + x.j + " shifted to " + (x.i+best_move.location.i) + " " + (x.j + best_move.location.j));
         }
+        // builda road to connect this building to perimeter
+        List<Set<Cell>> roadCells_list = findShortestRoad(shiftedCells, land);
+        if (roadCells_list != null) {
+            int best_perimeter_road = Integer.MIN_VALUE;
+            Set<Cell> roadCells = new HashSet<Cell>();
+            for (Set<Cell> road:roadCells_list) {
+                int perimeter = 0;
+                for(Cell x : road) {
+                    for(Cell y: x.neighbors()) {
+                        if (road.contains(y)) continue;
+                        Cell.Type t = land.getCellType(y.i,y.j);
+                        // if (t == Cell.Type.FACTORY) {
+                        //     perimeter+=2;
+                        // }
 
-    	List<Cell> startCoors = getStartCoors(land,request.type == Building.Type.FACTORY);
-        this.left_min = Integer.MAX_VALUE;
-        pickMove(startCoors,m,land,request);
-        //System.out.println("startCoors size:" + startCoors.size());
-        if(m.accept){
-            //print(m);
-            //System.out.println("====================");
-            return m;
-        }
-    	//this level is full; build roads for next level;
-        //update level information
-		if(request.type == Building.Type.FACTORY){
-			factory_level++;	
-		}
-		else{
-			residence_level++;
-		}
-		startCoors = getStartCoors(land,request.type == Building.Type.FACTORY);
-		this.left_min = Integer.MAX_VALUE;
-		pickMove(startCoors,m,land,request);
-    	return m;
-    }
-
-
-
-    //build the roads based on size of land
-    private void buildRoad(int side){
-        roads = new HashSet<Cell>();
-        int lo = 5;
-        int hi = side - 6;
-        while(lo<hi){
-            for(int j = 0; j < side; j++){
-                Cell road_cell1 = new Cell(lo,j);
-                Cell road_cell2 = new Cell(hi,j);
-                roads.add(road_cell1);
-                roads.add(road_cell2);
-                if(lo-1>=0) road_neighbors.add(new Cell(lo-1,j));
-                if(lo+1<=side-1) road_neighbors.add(new Cell(lo+1,j));
-                if(hi-1>=0) road_neighbors.add(new Cell(hi-1,j));
-                if(hi+1<=side-1) road_neighbors.add(new Cell(hi+1,j));
-            }
-            lo += 6;
-            hi -= 6;
-        }
-    }
-
-
-    //for residence, pick the comb of water and park s.t available left space is the fewest
-    //for factory just search all possible placements at starting coordinates
-    private void pickMove(List<Cell> startCoors,Move m,Land land,Building request){
-        Building[] rotations = request.rotations();  
-        for (int ri = 0 ; ri < rotations.length ; ri++) {
-            Building b = rotations[ri];
-            for(Cell p:startCoors){
-                if (land.buildable(b, p) && connected(land,b,p) && !hitRoad(p,b)){
-                    //System.out.println("check building: " + b.toString());
-                    //System.out.println("location: " + p.toString());
-                    DFS(land,b,m,p,new HashSet<Cell>(),new HashSet<Cell>(),request,ri);
-                }
-            }
-        }
-    }      
-
-    //check if current Building is connected to a road or boundary
-    private boolean connected(Land land,Building b,Cell p){
-        Iterator<Cell> itr = b.iterator();
-        int side = land.side;
-        while(itr.hasNext()){
-            Cell c = itr.next();
-            Cell loc = new Cell(c.i+p.i,c.j+p.j);
-            if(loc.i == 0 || loc.i == side-1 || loc.j == 0 || loc.j == side-1) return true;
-            if(road_neighbors.contains(loc)) return true;
-        }
-        return false;
-    }
-
-    private boolean hitRoad(Cell p, Building b){
-        Iterator<Cell> itr = b.iterator();
-        while(itr.hasNext()){
-            Cell c = itr.next();
-            Cell check_cell = new Cell(c.i+p.i, c.j+p.j);
-            if(roads.contains(check_cell)) return true;
-        }
-        return false;
-    }
-
-
-    //convert cell b into absolute coordinates
-    private Cell convert(Cell b,Cell p){
-        return new Cell(b.i+p.i,b.j+p.j);
-    }
-
-    //search all valid placement of 4 cell water and parks
-    //find the placement that returns the smallest leftRemainingCell
-    private void DFS(Land land,Building b,Move m,Cell p,Set<Cell> waters,Set<Cell> parks,Building request,int ri){
-        if(b.type == Building.Type.FACTORY){
-            checkOptimal(land,b,m,p,waters,parks,request,ri);
-        }
-        else{
-            //search water first
-            if(waters.size()<4){
-                Set<Cell> copy = new HashSet<Cell>(waters);
-                Iterator<Cell> itr = waters.size() == 0? b.iterator():copy.iterator();
-                boolean available = false;
-                while(itr.hasNext()){
-                    Cell next = itr.next();
-                    Cell curr = waters.size() == 0? convert(next,p) : next;
-                    for(Cell n:curr.neighbors()){
-                        if(!visited.contains(n) && unoccupied(land,n,p,b,waters,parks)){
-                            available = true;
-                            waters.add(n);
-                            DFS(land,b,m,p,waters,parks,request,ri);
-                            waters.remove(n);
+                        if (t == Cell.Type.ROAD) {
+                            perimeter+=200;
                         }
+                        // if (t == Cell.Type.RESIDENCE) {
+                        //     perimeter+=2;
+                        // }
+                        // if (t == Cell.Type.PARK || t == Cell.Type.WATER) {
+                        //     perimeter+=2;
+                        // }
                     }
                 }
-                //waters are less than 4 but no more cells can be placed
-                //remove water and check optimality
-                if(!available){
-                    checkOptimal(land,b,m,p,new HashSet<Cell>(),parks,request,ri);
+                if (perimeter > best_perimeter_road) {
+                    best_perimeter_road = perimeter;
+                    roadCells = road;
                 }
             }
-            //then park
-            else if(parks.size()<4){
-                Set<Cell> copy = new HashSet<Cell>(parks);
-                Iterator<Cell> itr = parks.size() == 0? b.iterator():copy.iterator();
-                boolean available = false;
-                while(itr.hasNext()){
-                    Cell next = itr.next();
-                    Cell curr = parks.size() == 0? convert(next,p) : next;
-                    for(Cell n:curr.neighbors()){
-                        if(!visited.contains(n) && unoccupied(land,n,p,b,waters,parks)){
-                            available = true;
-                            parks.add(n);
-                            DFS(land,b,m,p,waters,parks,request,ri);
-                            parks.remove(n);
+
+            best_move.road = roadCells;
+            road_cells.addAll(roadCells);
+            //int x = gen.nextInt();
+
+
+           
+
+            if(request.type == request.type.RESIDENCE) {        
+                Set<Cell> markedForConstruction = new HashSet<Cell>();
+                markedForConstruction.addAll(roadCells);
+                Set<Cell> best_park = new HashSet<Cell>();
+                int best_perimeter = 100;
+                int best_size = 100;
+
+                for(int i = 0; i < ITERATION_COUNT; ++i) {
+                    int perimeter = 0;
+                    int size = 0;
+                    Set<Cell> park_option = randomWalk(shiftedCells, markedForConstruction, land, 4, 1);
+                    size = park_option.size()>0?park_option.size():110;
+                    for(Cell x : park_option) {
+                        for(Cell y: x.neighbors()) {
+                            if (park_option.contains(y)) continue;
+                            Cell.Type t = land.getCellType(y.i,y.j);
+                            if (t == Cell.Type.FACTORY) {
+                                perimeter+=waterpark_to[2];
+                            }
+                            // if (land.land[y.i][y.j].isRoad()) {
+                            //  perimeter+=2;
+                            // }
+                            if (t == Cell.Type.EMPTY) {
+                                perimeter+=waterpark_to[0];
+                            }
+                            if (t == Cell.Type.RESIDENCE) {
+                                perimeter+=waterpark_to[1];
+                            }
+                            if (t == Cell.Type.PARK || t == Cell.Type.WATER) {
+                                perimeter+=waterpark_to[3];
+                            }
                         }
                     }
+                    if(size < best_size || (size == best_size && perimeter < best_perimeter)) {
+                        best_perimeter = perimeter;
+                        best_park = park_option;
+                        best_size = size;
+                        //if(size != 4 && size != 0) System.out.println("hi");
+                    }
                 }
-                //parks are less than 4 but no more cells can be placed
-                //remove parks and check optimality
-                if(!available){
-                    checkOptimal(land,b,m,p,waters,new HashSet<Cell>(),request,ri);
-                }
-            }
-            //both water and park are filled; check leftRemainingCells of this placement
-            else{
-                checkOptimal(land,b,m,p,waters,parks,request,ri);
-            }
-        }
-    }
 
-
-    //see if current placement is optimal, if so modify move and curr_min
-    private void checkOptimal(Land land,Building b,Move m,Cell p,Set<Cell> waters,Set<Cell> parks,Building request,int ri){
-        int curr = leftRemainingCells(land,b,p,waters,parks);
-       //System.out.println("optimal checked for" + b.toString());
-        if(curr<left_min){
-            m.accept = true;
-            m.request = request;
-            m.location = p;
-            m.rotation = ri;
-            m.water = new HashSet<Cell>(waters);
-            m.park = new HashSet<Cell>(parks);
-            /*
-            //find building rotation
-            Building[] rotations = request.rotations();
-            for(int i = 0; i < rotations.length; i++){
-                if(rotations[i].equals(b)) m.rotation = i;
-            }
-            */
-        
-            this.left_min = curr;
-            addToVisited(waters);
-            addToVisited(parks);
-        }
-    }
-
-
-    private void addToVisited(Set<Cell> s){
-        Iterator<Cell> itr = s.iterator();
-        while(itr.hasNext()){
-            Cell n = itr.next();
-            visited.add(n);
-        }
-    }
-
-    //scan from left to right, stop at the column with all unoccupied cells
-    //count the number of unoccupied cells before that column
-    private int leftRemainingCells(Land land,Building b,Cell p,Set<Cell> waters,Set<Cell> parks){
-        boolean isFactory = b.type == Building.Type.FACTORY;
-        int side = land.side;
-        //int row_lo = isFactory? side-1-(factory_level*6+5) : residence_level*6;
-        //int row_hi = isFactory? side-1-(factory_level*6) : residence_level*6+5;
-        
-        int res = 0;
-        if(isFactory){
-            int level = factory_level;
-            while(level>=0){
-                int j = 0;
-                int row_lo =side-1-(level*6+5);
-                int row_hi = side-1-(level*6);
-                while(j < side){
-                    int unoccupied = 0;
-                    for(int i = row_lo; i < row_hi; i++){
-                        if(unoccupied(land,new Cell(i,j),p,b,waters,parks)){
-                            unoccupied++;
+                best_move.park = best_park;
+                markedForConstruction.addAll(best_move.park);
+                
+                best_perimeter = 100;
+                best_park = new HashSet<Cell>();
+                best_size = 100;
+                for(int i = 0; i < ITERATION_COUNT; ++i) {
+                    int perimeter = 0;
+                    int size = 0;
+                    Set<Cell> park_option = randomWalk(shiftedCells, markedForConstruction, land, 4, 2);
+                    size = park_option.size()>0?park_option.size():110;
+                    for(Cell x : park_option) {
+                        for(Cell y: x.neighbors()) {
+                            if (park_option.contains(y)) continue;
+                            Cell.Type t = land.getCellType(y.i,y.j);
+                            if (t == Cell.Type.EMPTY) {
+                                perimeter+=waterpark_to[0];
+                            }
+                            if (t == Cell.Type.FACTORY) {
+                                perimeter+=waterpark_to[2];
+                            }
+                            // if (land.land[y.i][y.j].isRoad()) {
+                            //  perimeter+=2;
+                            // }
+                            if (t == Cell.Type.RESIDENCE) {
+                                perimeter+=waterpark_to[1];
+                            }
+                            if (t == Cell.Type.PARK || t == Cell.Type.WATER) {
+                                perimeter+=waterpark_to[3];
+                            }
                         }
                     }
-                    if(unoccupied == 5){
-                        break;
-                    } 
-                    res += unoccupied;
-                    j++;
+                    if(size < best_size || (size == best_size && perimeter < best_perimeter)) {
+                        best_perimeter = perimeter;
+                        best_park = park_option;
+                        best_size = size;
+                        //if(size != 4 && size != 0) System.out.println("hi");
+                    }
                 }
-                level = -1;
+                best_move.water = best_park;
+                prev_water = best_move.water;
+            }
+            if(stop){
+                best_move.water = new HashSet<Cell>();
+                best_move.park = new HashSet<Cell>();
+            }
+            return best_move;
+        }
+        else {
+            stop = true;
+            return new Move(false);    
+        }
+    }
+    
+    private Set<Cell> getNeighbors(Set<Cell> b, Land land){
+        Set<Cell> res = new HashSet<Cell>();
+        for(Cell building_cell:b){
+            for(Cell n:building_cell.neighbors()){
+                if(b.contains(n)) continue;
+                res.add(n);
             }
         }
-        else{
-            int level = residence_level;
-            while(level>=0){
-                int j = 0;
-                int row_lo = level*6;
-                int row_hi = level*6 +5;
-                while(j < side){
-                    int unoccupied = 0;
-                    for(int i = row_lo; i < row_hi; i++){
-                        if(unoccupied(land,new Cell(i,j),p,b,waters,parks)){
-                            unoccupied++;
-                        }
-                    }
-                    if(unoccupied == 5){
-                        break;
-                    } 
-                    res += unoccupied;
-                    j++;
-                }
-                level = -1;
-            }
-        }        
         return res;
     }
 
-
-
-    //c is using abosulte coordinates
-    private boolean unoccupied(Land land,Cell c,Cell p,Building b,Set<Cell> waters,Set<Cell> parks){
-        boolean res = true;
-        if(!land.unoccupied(c) || waters.contains(c) || parks.contains(c) || roads.contains(c)){
-            return false;
-        }
-        //check if this cell conflicts with building
-        Iterator<Cell> itr = b.iterator();
-        while(itr.hasNext()){
-            Cell tmp = itr.next();
-            Cell building_lo = new Cell(tmp.i+p.i,tmp.j+p.j);
-            if(building_lo.equals(c)) {
-                return false;
+    // build shortest sequence of road cells to connect to a set of cells b
+    //List<Set<Cell>>
+    private List<Set<Cell>> findShortestRoad(Set<Cell> b, Land land) {
+        List<Set<Cell>> res = new ArrayList<Set<Cell>>();
+        boolean[][] checked = new boolean[land.side][land.side];
+        Queue<Cell> queue = new LinkedList<Cell>();
+        // add border cells that don't have a road currently
+        Cell source = new Cell(Integer.MAX_VALUE,Integer.MAX_VALUE); // dummy cell to serve as road connector to perimeter cells
+        for(Cell x : b) {
+            if(x.i==0 || x.i==land.side-1 || x.j==0 || x.j==land.side-1) return res;
+            for(Cell y : x.neighbors()) {
+                if(road_cells.contains(y)) {
+                    return res;
+                    //return new HashSet<Cell>();
+                }
             }
         }
-        return true;
-    }
 
-    //return all possible starting placement coors
-    private List<Cell> getStartCoors(Land land,boolean isFactory){
-    	int side = land.side;
-
-    	//int row_low = isFactory? side-1-(factory_level*6+5) : residence_level*6;
-    	//int row_high = isFactory? side-1-(factory_level*6) : residence_level*6+5;
-        List<Cell> res = new ArrayList<Cell>();
+        for (int z=0; z<land.side; z++) {
+            if (b.contains(new Cell(0,z)) || b.contains(new Cell(z,0)) || b.contains(new Cell(land.side-1,z)) || b.contains(new Cell(z,land.side-1))) //if already on border don't build any roads
+            //return output;
+            return res;
+            if (land.unoccupied(0,z))
+            queue.add(new Cell(0,z,source));
+            if (land.unoccupied(z,0))
+            queue.add(new Cell(z,0,source));
+            if (land.unoccupied(z,land.side-1))
+            queue.add(new Cell(z,land.side-1,source));
+            if (land.unoccupied(land.side-1,z))
+            queue.add(new Cell(land.side-1,z,source));
+        }
+        // add cells adjacent to current road cells
+        for (Cell p : road_cells) {
+            for (Cell q : p.neighbors()) {
+            if (!road_cells.contains(q) && land.unoccupied(q) && !b.contains(q)) 
+                queue.add(new Cell(q.i,q.j,p)); // use tail field of cell to keep track of previous road cell during the search
+            }
+        }   
         
-
-        int fac_lo = side-1-(factory_level*6+5);
-        int res_hi = residence_level*6+5;
-        if(res_hi>=fac_lo) return res;
-        if(isFactory){
-            int level = factory_level;
-            while(level>=0){
-                res.addAll(getCellInRows(land,side-1-(level*6+5),side-1-(level*6)));
-                level--;
-            }
-        }
-        else{
-            int level = residence_level;
-            while(level>=0){
-                res.addAll(getCellInRows(land,level*6,level*6+5));
-                level--;
-            }
-        }
-    	return res;
-    }
-
-    
-    private List<Cell> getCellInRows(Land land,int row_lo,int row_hi){
-        List<Cell> res = new ArrayList<Cell>();
-        int side = land.side;
-        int right_lane = 0;
-        for(int i = row_lo; i < row_hi; i++){
-            for(int j = 0; j < side; j++){
-                if(!land.unoccupied(new Cell(i,j))){
-                    right_lane = Math.max(j,right_lane);
+        int best_len = Integer.MAX_VALUE;
+        boolean if_break = false;
+        while (!queue.isEmpty()) {
+            Cell p = queue.remove();
+            checked[p.i][p.j] = true;
+            for (Cell x : p.neighbors()) {
+                if (b.contains(x)) { // trace back through search tree to find path
+                    Cell tail = p;
+                    Set<Cell> output = new HashSet<Cell>();
+                    while (!b.contains(tail) && !road_cells.contains(tail) && !tail.equals(source)) {
+                        output.add(new Cell(tail.i,tail.j));
+                        tail = tail.previous;
+                    }
+                    if (!output.isEmpty() && output.size()<=best_len ){
+                        best_len = output.size();
+                        res.add(output);
+                        //return output;
+                    }
+                    if (output.size()>best_len) {
+                        if_break = true;
+                    }
+                }
+                else if (!checked[x.i][x.j] && land.unoccupied(x.i,x.j)) {
+                    x.previous = p;
+                    checked[x.i][x.j] = true;
+                    queue.add(x);
                 }
             }
+            if(if_break) break;
         }
-        for(int i = row_lo; i < row_hi; i++){
-            for(int j = 0; j < right_lane+2 && j < side; j++){
-                if(land.unoccupied(new Cell(i,j))){
-                    res.add(new Cell(i,j));
-                }
-             }
-        }
-        return res;
+
+        if (res.size()==0 && queue.isEmpty())
+            return null;
+        else
+            return res;
     }
-    
+
+    // walk n consecutive cells starting from a building. Used to build a random field or pond. 
+    private Set<Cell> randomWalk(Set<Cell> b, Set<Cell> marked, Land land, int n, int type) {
+        ArrayList<Cell> adjCells = new ArrayList<Cell>();
+        Set<Cell> output = new HashSet<Cell>();
+        for (Cell p : b) {
+            for (Cell q : p.neighbors()) {
+            if (land.isField(q) || land.isPond(q))
+                return new HashSet<Cell>();
+            if (!b.contains(q) && !marked.contains(q) && land.unoccupied(q) 
+                &&!(q.i == 0||q.i == land.side - 1||q.j == 0||q.j == land.side - 1))
+                adjCells.add(q);
+            }
+        }
+        if (adjCells.isEmpty())
+            return new HashSet<Cell>();
+        Cell tail = adjCells.get(gen.nextInt(adjCells.size()));
+        for (int ii=0; ii<n; ii++) {
+            ArrayList<Cell> walk_cells = new ArrayList<Cell>();
+            for (Cell p : tail.neighbors()) {
+                if (!b.contains(p) && !marked.contains(p) && land.unoccupied(p) && !output.contains(p)
+                    &&!(p.i == 0||p.i == land.side - 1||p.j == 0||p.j == land.side - 1))
+                    walk_cells.add(p);
+                if((land.isField(p) && type == 1) || (land.isPond(p) && type == 2)) {
+                //  System.out.println("hi");
+                    output.add(tail);
+                    return output;
+                }
+            }
+            if (walk_cells.isEmpty()) {
+            //return output; //if you want to build it anyway
+            return new HashSet<Cell>();
+            }
+            output.add(tail);       
+            tail = walk_cells.get(gen.nextInt(walk_cells.size()));
+        }
+        return output;
+    }
 }
+

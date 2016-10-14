@@ -1,0 +1,39 @@
+g9
+preallocates roads 7 cells apart for residences, tries to rotate residences to place them vertically
+
+g8
+bottom left corner is preallocated for shapes. default to random behavior for everywhere else
+
+g5
+seems similar to last time. only uses horizontal parks and ponds. leaves out a lot of blank space in the diagonal border between residences and factories.
+
+Rajiv: just call the default player when your player runs out of moves
+
+
+g4
+use shortest path search to link nearby parks/ponds to current building
+always build new park/pond if there are none within 4 steps
+wants to try machine learning for something
+
+Jingyu: just an optimization/search problem over parameter space
+Julian: caching of frequency of building shapes/sizes
+Jian: use ML to score performance of heuristics depending on board state
+
+
+g3
+pack space as tightly as possible using only residences/factories
+
+Bruce: smooth surface is not necessarily ideal since the pieces aren't necessarily smooth
+
+
+g1
+place pieces with maximum number of surrounding cells. extend paths to nearby ponds. iterate over 200 random walks and pick best one for parks/ponds
+small factories can end up in residential areas in small spaces
+
+
+g6
+create lines for park and water cells with different gaps and places residences accordingly with their size
+
+Jingyu: removing water cells should give higher score because they are only adjacent to one residence
+Ying: horizontal lines for roads seems good for factories but not necessarily for residences because of their irregular shape
+

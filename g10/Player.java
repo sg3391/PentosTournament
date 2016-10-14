@@ -5,369 +5,299 @@ import pentos.sim.Cell;
 import pentos.sim.Land;
 import pentos.sim.Move;
 
+import java.io.OutputStream;
+import java.io.PrintStream;
+import java.io.PrintWriter;
 import java.lang.reflect.Field;
 import java.util.*;
 
+public class Player extends pentos.g0.Player {
 
-public class Player extends pentos.g0.Player{
+	/* Keep the land's size */
+	public int landSize = 0;
+	public static int staticLandSize=0;
+	public boolean initialized = false;
+
 	/*
-	 * These are the possible points for a building to start to be built. 
-	 * Loop through this set to decide where exactly to put the building.
+	 * These are the possible points for a building to start to be built. Loop
+	 * through this set to decide where exactly to put the building.
 	 * 
-	 * In order to pack buildings closer to the corner, 
-	 * whenever a new building is settled, the set will grow to contain the 
-	 * cells on this building's margin, in order to make further moves to
-	 * pack new buildings closer to the existing one.
-	 * */
-	Set<Cell> factoryStart;
-	Set<Cell> residenceStart;
-	Set<Cell> borders;
+	 * In order to pack buildings closer to the corner, whenever a new building
+	 * is settled, the set will grow to contain the cells on this building's
+	 * margin, in order to make further moves to pack new buildings closer to
+	 * the existing one.
+	 */
+	public Set<Cell> factoryStart;
+	public Set<Cell> residenceStart;
+	public Set<Cell> borders;
+
+	public Set<Cell> roadcells;// Just changed the name so it will not overwrite
+								// the road_cells field in g0.Player
+	public Set<Cell> roadNeighbors;
+
+	public Set<Cell> parkCells = new HashSet<>();
+	public Set<Cell> waterCells = new HashSet<>();
+	public Set<Cell> parkNeighbors = new HashSet<>();
+	public Set<Cell> waterNeighbors = new HashSet<>();
+
+	public Set<Cell> vacantBorders = new HashSet<>();
+
+	/* A couple of planners working for the player */
+	public Planner packToCornerPlanner = new PackToCornerPlanner();
+	public Planner bruteForcePlanner = new BruteForcePlanner();
+	public Planner dispatchingPlanner=new DispatchingPlanner();
 	
+	public int[] factoryRows;
 	
-	public Set<Cell> roadcells = new HashSet<Cell>();//Just changed the name so it will not overwrite the road_cells field in g0.Player
+	public OutputStream writer;
 	
-	public static class Action{
-		Building building;
-		Cell startPoint;
-		int rotation;
-		Set<Cell> roadCells=new HashSet<>();
-		Set<Cell> pondCells=new HashSet<>();
-		Set<Cell> parkCells=new HashSet<>();
-		
-		public Action(){
-			building=null;
-			startPoint=null;
-			rotation=0;
-		}
-		public Action(Building b,Cell c){
-			building=b;
-			startPoint=c;
-			rotation=0;
-		}
-		public Action(Building b,Cell c,int r){
-			building=b;
-			startPoint=c;
-			rotation=r;
-		}
-		public void setRoad(Set<Cell> cells){
-			roadCells=cells;
-		}
-		public void setPark(Set<Cell> cells){
-			parkCells=cells;
-		}
-		public void setPond(Set<Cell> cells){
-			pondCells=cells;
-		}
-	}
+
 	@Override
-	public void init() { // function is called once at the beginning before play is called
-		System.out.println("Initiating a player with strategy to start from two corners.");
-		factoryStart=new HashSet<>();
-		factoryStart.add(new Cell(49,49));
-		residenceStart=new HashSet<>();
-		residenceStart.add(new Cell(0,0));
+	public void init() { 
+//		 System.out.println("Do not really do things in init()");
+	}
+
+	public void learnLand(Land land) {
+		this.landSize = land.side;
+		if(staticLandSize==0)
+			staticLandSize=land.side;
+//		System.out.println("Initiating a player with strategy to start from two corners.");
+		factoryStart = new HashSet<>();
+		factoryStart.add(new Cell(landSize-1, landSize-1));
 		
-		/* Initiate border cells */
-		borders=new HashSet<>();
-		for(int i=0;i<50;i++){
-			borders.add(new Cell(0,i));
-			borders.add(new Cell(i,0));
-			borders.add(new Cell(49-i,49));
-			borders.add(new Cell(49,49-i));
+		residenceStart = new HashSet<>();
+		residenceStart.add(new Cell(0, 0));
+		
+		/* Change: Add more cells as candidates */
+		for(int i=0;i<land.side;i++){
+//			residenceStart.add(new Cell(i,0));
+			residenceStart.add(new Cell(0,i));
+//			factoryStart.add(new Cell(land.side-i,land.side-1));
+			factoryStart.add(new Cell(land.side-1,land.side-i));
 		}
+
+		/* Initiate border cells */
+		borders = new HashSet<>();
+		for (int i = 0; i < landSize; i++) {
+			borders.add(new Cell(0, i));
+			borders.add(new Cell(i, 0));
+			borders.add(new Cell(landSize-1 - i, landSize-1));
+			borders.add(new Cell(landSize-1, landSize-1 - i));
+		}
+
+		roadcells = new HashSet<Cell>();
+		roadNeighbors = new HashSet<>();
+		roadNeighbors.addAll(borders);
+
+		vacantBorders.addAll(borders);
+
+		initialized = true;
 		
-		/* Initiate boder roads */
-		
-		System.out.println(borders.size()+" border cells");
-    }
+		factoryRows = new int[land.side];
+        for (int i = 0; i < land.side; i++) {
+            factoryRows[i] = 0;
+        }
+	}
+
 	@Override
 	public Move play(Building request, Land land) {
-		Action willDo=packBuildingToCorner(request,land);
-		if(willDo.startPoint!=null){
-			if(willDo.roadCells==null)
-				willDo.roadCells=new HashSet<Cell>();
-			return new Move(
-					true,//accept the move
-					willDo.building,//building
-					willDo.startPoint,//location
-					willDo.rotation,//rotation
-					willDo.roadCells,//road
-					willDo.pondCells,//water
-					willDo.parkCells//park				
-					);
-		}else
-				return new Move(false);
+		/* Redirect output stream */
+		PrintStream stream=System.out;
+		System.setOut(new java.io.PrintStream(new java.io.OutputStream() {
+		    @Override public void write(int b) {}
+		}) {
+		    @Override public void flush() {}
+		    @Override public void close() {}
+		    @Override public void write(int b) {}
+		    @Override public void write(byte[] b) {}
+		    @Override public void write(byte[] buf, int off, int len) {}
+		    @Override public void print(boolean b) {}
+		    @Override public void print(char c) {}
+		    @Override public void print(int i) {}
+		    @Override public void print(long l) {}
+		    @Override public void print(float f) {}
+		    @Override public void print(double d) {}
+		    @Override public void print(char[] s) {}
+		    @Override public void print(String s) {}
+		    @Override public void print(Object obj) {}
+		    @Override public void println() {}
+		    @Override public void println(boolean x) {}
+		    @Override public void println(char x) {}
+		    @Override public void println(int x) {}
+		    @Override public void println(long x) {}
+		    @Override public void println(float x) {}
+		    @Override public void println(double x) {}
+		    @Override public void println(char[] x) {}
+		    @Override public void println(String x) {}
+		    @Override public void println(Object x) {}
+		    @Override public java.io.PrintStream printf(String format, Object... args) { return this; }
+		    @Override public java.io.PrintStream printf(java.util.Locale l, String format, Object... args) { return this; }
+		    @Override public java.io.PrintStream format(String format, Object... args) { return this; }
+		    @Override public java.io.PrintStream format(java.util.Locale l, String format, Object... args) { return this; }
+		    @Override public java.io.PrintStream append(CharSequence csq) { return this; }
+		    @Override public java.io.PrintStream append(CharSequence csq, int start, int end) { return this; }
+		    @Override public java.io.PrintStream append(char c) { return this; }
+		});
 		
-	}
-	private Action packBuildingToCorner(Building request,Land land){
-		Action toTake=new Action();
-		if(request.type==Building.Type.RESIDENCE){
-			toTake= packResidenceToCorner(request,land);
-		}else if(request.type==Building.Type.FACTORY){
-			toTake= packFactoryToCorner(request,land);
-		}else{
-			System.out.println("Error: Type "+request.type+" building request met!");
-		}
-		reportAction(toTake);
-		return toTake;
-	}
-	private void reportAction(Action action){
-		if(action==null||action.building==null){
-			System.out.println("Empty action.");
-			return;
-		}
-			
-		System.out.println("The action is: ");
-		System.out.println("Building "+action.building.type);
-		Building rotated=action.building.rotations()[action.rotation];
-		System.out.println("Cells to build: "+ToolBox.shiftCells(rotated,action.startPoint));
-		System.out.println("Roads in the pack: "+action.roadCells);
-	}
-	private Action packFactoryToCorner(Building request,Land land){
-		boolean canBuild=false;
-		int score=0;
-		Action toTake=new Action();
-		Set<Cell> toOccupy=new HashSet<>();
-		Set<Cell> avail=new HashSet<>();
-		Set<Cell> roads=new HashSet<>();
 		
-		//try all cells as start point
-		for(Cell c:factoryStart){
-			/* Because the factory grows from the bottom right corner,
-			 * the starting point to be used to build it should be the 
-			 * bottom right corner.
-			 */
-			Building[] rotations=request.rotations();
-			int len=rotations.length;
-//			System.out.println(len+" rotations available.");
-			for(int i=0;i<len;i++){
-				Building b=rotations[i];
-				
-				/* Transit the building coordination regarding the cell because it's in the bottom right corner */
-				Cell[] reflected=ToolBox.offsetBottomRight(b,c);
-				if(reflected==null){
-//					System.out.println("Out of border. This try doesn't work");
-					continue;
-				}
-				/* Find the top left cell of the rectangle which will be later used as starting point */
-				Cell topLeft=ToolBox.findTopLeft(reflected);
-				ToolBox.lookToTopLeft(reflected,topLeft);
-				Building ref=new Building(reflected,Building.Type.FACTORY);
-				
-				/* Debug requirement: compare the top-left referenced and original building coordination */
-				if(!ToolBox.compareBuildings(ref,b)){
-					System.out.println("The reflected building cells are not the same anymore!");
-				}
-				
-				/* If this move is valid, perform it. */
-				canBuild=land.buildable(b, topLeft);
-				if(canBuild){
-//					System.out.println("One solution found:"+ref);
-					
-					/* Include the road cells 
-					 */
-					Set<Cell> shiftedCells=ToolBox.shiftCells(b,topLeft);
-					roads = ToolBox.findShortestRoad(shiftedCells, land, roadcells);
-//					if(roads.size()>0)
-//						System.out.println("Gotta build road "+roads.toString());
-					
-					//Validate the building after building roads
-					Set<Cell> existingRoads=ToolBox.copyLandRoads(land);
-					if(roads!=null){
-						for(Cell r:roads){
-							existingRoads.add(new Cell(r.i+1,r.j+1));
-						}
-					}else{
-//						System.out.println("Null roads.");
-						continue;
-					}
-					Cell[] erc=existingRoads.toArray(new Cell[existingRoads.size()]);
-					boolean roadValid=Cell.isConnected(erc, 50+2);
-					if(!roadValid){
-//						System.out.println("Building not valid after building roads. How could this be?");;
-						continue;
-						
-					}
+		if (initialized == false) {
+			learnLand(land);
+		}
 
-					/*
-					 * This is to calculate the consequence to the neighboring if the action is made.
-					 * */
-					Set<Cell> occupyThen=occupyCells(shiftedCells,roads);
-					Set<Cell> availThen=newSurrounding(occupyThen,land);
-					
-					/*
-					 * The score of a solution is, for now, decided by how close it can be 
-					 * packed with the existing cluster.
-					 * */
-					int thisScore=calculateScore(factoryStart,occupyThen,availThen);
-					if(thisScore>score){
-//						System.out.println("Found a better solution with score "+thisScore);
-						score=thisScore;
-						toTake.building=request;
-						toTake.startPoint=topLeft;
-						toTake.rotation=i;
-						
-						toTake.roadCells=roads;
-						
-						toOccupy=occupyThen;
-						avail=availThen;
-					}
-				}
-			}
-		}
-//		System.out.println("Roads before update are:"+roadcells);
-//		System.out.println("Adding road cells:"+toTake.roadCells);
-		
-//		System.out.println("The optimal solution so far has score:"+score);
-		/* If the score is not 0, perform it. */
-		if(score>0){
-			Building toBuild=toTake.building.rotations()[toTake.rotation];
-			boolean canDo=land.buildable(toBuild, toTake.startPoint);
-			if(!canDo){
-//				System.out.println("The action cannot be performed?!");
-				return new Action();
-			}
-			updateFactoryStart(toOccupy,avail);
-			updateRoads(toTake.roadCells);
-			updateBorders(toOccupy,avail);
-		}else{
-			System.out.println("No solution");
-		}
-		return toTake;
-	}
-	private Action packResidenceToCorner(Building request,Land land){
-		boolean canBuild=false;
-		int score=0;
-		Action toTake=new Action();
-		Set<Cell> toOccupy=new HashSet<>();
-		Set<Cell> avail=new HashSet<>();
-		Set<Cell> roads=new HashSet<>();
-		
-		//try all cells as start point
-		for(Cell c:residenceStart){
-			/* Because the factory grows from the bottom right corner,
-			 * the starting point to be used to build it should be the 
-			 * bottom right corner.
-			 */
-			Building[] rotations=request.rotations();
-			int len=rotations.length;
-//			System.out.println(len+" rotations available.");
-			for(int i=0;i<len;i++){
-				Building b=rotations[i];
-				
-				/* If this move is valid, perform it. */
-				canBuild=land.buildable(b, c);
-				if(canBuild){
-//					System.out.println("One solution found:"+b);
-					
-					/* Include the road cells 
-					 */
-					Set<Cell> shiftedCells=ToolBox.shiftCells(b,c);
-					roads = ToolBox.findShortestRoad(shiftedCells, land, roadcells);
-					
-					//Validate the building after building roads
-					Set<Cell> existingRoads=ToolBox.copyLandRoads(land);
-					if(roads!=null){
-						for(Cell r:roads){
-							existingRoads.add(new Cell(r.i+1,r.j+1));
-						}
+		boolean valid = false;
+		Action willDo = new Action();
+		try {
+//			willDo = packToCornerPlanner.makeAPlan(this, request, land);
+			willDo = dispatchingPlanner.makeAPlan(this, request, land);
+			if (willDo==null||willDo.getStartPoint() == null) {
+				System.out.println("Empty move");
+			} else {
+				//Compromise: Remove unbuildable parks and ponds
+				Set<Cell> combined=ToolBox.combineSets(willDo.getAbsoluteBuildingCells(),willDo.getRoadCells());
+				Set<Cell> keepParks=new HashSet<>();
+				for(Cell c:willDo.getParkCells()){
+					if(!land.unoccupied(c)||combined.contains(c)){
+						System.out.println("Error: Park "+c+" is not available! Need to check out why.");
 					}else{
-//						System.out.println("Null roads.");
-						continue;
-					}
-					Cell[] erc=existingRoads.toArray(new Cell[existingRoads.size()]);
-					boolean roadValid=Cell.isConnected(erc, 50+2);
-					if(!roadValid){
-//						System.out.println("Building not valid after building roads. How could this be?");;
-						continue;
-						
-					}
-					
-					
-					
-//					if(roads.size()>0)
-//						System.out.println("Gotta build road "+roads.toString());
-					
-					/*
-					 * Pond cells
-					 * */
-					
-					/*
-					 * Park cells
-					 * */
-					
-					
-					/*
-					 * This is to calculate the consequence to the neighboring if the action is made.
-					 * */
-					Set<Cell> occupyThen=occupyCells(shiftedCells,roads);
-					Set<Cell> availThen=newSurrounding(occupyThen,land);
-					
-					/*
-					 * The score of a solution is, for now, decided by how close it can be 
-					 * packed with the existing cluster.
-					 * */
-					int thisScore=calculateScore(residenceStart,occupyThen,availThen);
-					if(thisScore>score){
-//						System.out.println("Found a better solution with score "+thisScore);
-						score=thisScore;
-						toTake.building=request;
-						toTake.startPoint=c;
-						toTake.rotation=i;
-						
-						toTake.roadCells=roads;
-						
-						toOccupy=occupyThen;
-						avail=availThen;
+						keepParks.add(c);
 					}
 				}
+				willDo.setParkCells(keepParks);
+				
+				combined.addAll(willDo.getParkCells());
+				Set<Cell> keepWater=new HashSet<>();
+				for(Cell c:willDo.getWaterCells()){
+					if(!land.unoccupied(c)||combined.contains(c)){
+						System.out.println("Error: Water "+c+" is not available! Need to check out why.");
+					}else{
+						keepWater.add(c);
+					}
+				}
+				willDo.setWaterCells(keepWater);
+				
+				valid = PlanEvaluator.validateMove(willDo, this, land);
+			}
+		} catch (Exception e) {
+			System.out.println("Error: Exception is thrown from packToCornerPlanner:");
+			e.printStackTrace();
+		}
+
+		/* If no valid move is to be performed, fall back to brute force. */
+		if (!valid) {
+			try {
+				System.out.println("Fall back to brute force solution");
+				willDo = bruteForcePlanner.makeAPlan(this, request, land);
+				/* Validate this action as well? */
+				valid = PlanEvaluator.validateMove(willDo, this, land);
+			} catch (Exception e) {
+				System.out.println("Error: Exception thrown in bruteForcePlanner:");
+				e.printStackTrace();
 			}
 		}
-//		System.out.println("The optimal solution so far has score:"+score);
-//		System.out.println("Roads before update are:"+roadcells);
-//		System.out.println("Adding road cells:"+toTake.roadCells);
+
+		/* If brute force cannot do, return empty action */
+		if (!valid) {
+			return new Move(false);
+		}
 		
-		/* If the score is not 0, perform it. */
-		if(score>0){
-			Building toBuild=toTake.building.rotations()[toTake.rotation];
-			boolean canDo=land.buildable(toBuild, toTake.startPoint);
-			if(!canDo){
-//				System.out.println("The action cannot be performed?!");
-				return new Action();
-			}
-			updateResidenceStart(toOccupy,avail);
-			updateRoads(toTake.roadCells);
-			updateBorders(toOccupy,avail);
-		}else{
-			System.out.println("No solution");
+		/* Pre-planned roads */
+//		Cell anchor=new Cell(0,land.side/2-1);
+//		if(land.unoccupied(anchor)){
+//			Set<Cell> roadPlan=willDo.getRoadCells();
+//			System.out.println("Build pre-planned roads.");
+//			for(int i=0;i<10;i++){
+//				roadPlan.add(new Cell(i,land.side/2-1));
+//				roadPlan.add(new Cell(land.side-1-i,land.side/2-1));
+//				roadPlan.add(new Cell(land.side/2-1,i));
+//				roadPlan.add(new Cell(land.side/2-1,land.side-1-i));
+//			}
+//		}
+
+		/* Update related neighbors */
+
+		/* Find overall space to occupy */
+		Set<Cell> shifted = willDo.getAbsoluteBuildingCells();
+		Set<Cell> overallToOccupy = ToolBox.combineSets(shifted, willDo.getRoadCells(), willDo.getParkCells(),
+				willDo.getWaterCells());
+		Set<Cell> overallNewNeighbors = ToolBox.vacantNeighbors(overallToOccupy, overallToOccupy, land);
+
+		/* Update road neighbors */
+		roadcells.addAll(willDo.getRoadCells());
+		Set<Cell> newRoadNeighbors = ToolBox.vacantNeighbors(willDo.getRoadCells(), overallToOccupy, land);
+		updateNeighbors(roadNeighbors, newRoadNeighbors, overallToOccupy);
+
+		/* Update water and neighbors */
+		waterCells.addAll(willDo.getWaterCells());
+		Set<Cell> newWaterNeighbors = ToolBox.vacantNeighbors(willDo.getWaterCells(), overallToOccupy, land);
+		updateNeighbors(waterNeighbors, newWaterNeighbors, overallToOccupy);
+
+		/* Update parks and neighbors */
+		parkCells.addAll(willDo.getParkCells());
+		Set<Cell> newParkNeighbors = ToolBox.vacantNeighbors(willDo.getParkCells(), overallToOccupy, land);
+		updateNeighbors(parkNeighbors, newParkNeighbors, overallToOccupy);
+
+		/* Update building type related neighbors */
+		Set<Cell> newBuildingNeighbors = ToolBox.vacantNeighbors(shifted, overallToOccupy, land);
+		if (willDo.getBuilding().type == Building.Type.RESIDENCE) {
+			updateNeighbors(residenceStart, newBuildingNeighbors, overallToOccupy);
+		} else if (willDo.getBuilding().type == Building.Type.FACTORY) {
+			updateNeighbors(factoryStart, newBuildingNeighbors, overallToOccupy);
+		} else {
+			System.out.println("Error: Building has type " + willDo.getBuilding().type);
 		}
-		return toTake;
+
+		/* Update borders */
+		updateNeighbors(borders, overallNewNeighbors, overallToOccupy);
+
+		/* Update vacant borders */
+		vacantBorders.removeAll(overallToOccupy);
+		
+		
+		/* Return print stream to out */
+		System.setOut(stream);
+
+		return new Move(true, // accept the move
+				willDo.getBuilding(), // building
+				willDo.getStartPoint(), // location
+				willDo.getRotation(), // rotation
+				willDo.getRoadCells(), // road
+				willDo.getWaterCells(), // water
+				willDo.getParkCells());
 	}
-	private void updateRoads(Set<Cell> roads){
-		if(roads!=null)
+
+	public void updateNeighbors(Set<Cell> toUpdate, Set<Cell> toAdd, Set<Cell> toRemove) {
+		toUpdate.addAll(toAdd);
+		toUpdate.removeAll(toRemove);
+	}
+
+	public void updateRoads(Set<Cell> roads) {
+		if (roads != null)
 			roadcells.addAll(roads);
-//		System.out.println("Roads after update are "+roadcells);
+		System.out.println(roadcells.size() + " road cells after update.");
 	}
-	private void updateBorders(Set<Cell> toOccupy,Set<Cell> avail){
+
+	public void updateBorders(Set<Cell> toOccupy, Set<Cell> avail) {
 		borders.removeAll(toOccupy);
 		borders.addAll(avail);
-//		System.out.println("Now the borders are:"+borders);
+		// System.out.println("Now the borders are:"+borders);
 	}
-	private Set<Cell> occupyCells(Set<Cell> buildingCells,Set<Cell> roadCells){
-		Set<Cell> overall=new HashSet<>();
+
+	public Set<Cell> occupyCells(Set<Cell> buildingCells, Set<Cell> roadCells) {
+		Set<Cell> overall = new HashSet<>();
 		overall.addAll(buildingCells);
-		if(roadCells!=null)
+		if (roadCells != null)
 			overall.addAll(roadCells);
 		return overall;
 	}
-	private Set<Cell> newSurrounding(Set<Cell> toOccupy,Land land){
-		Set<Cell> avail=new HashSet<>();
-		for(Cell c:toOccupy){
-			Cell[] neighbors=c.neighbors();
-			//the cell can be a candidate for another new start if not occupied
-			for(int i=0;i<neighbors.length;i++){
-				Cell cc=neighbors[i];
-				if(land.unoccupied(cc)){
+
+	public Set<Cell> newSurrounding(Set<Cell> toOccupy, Land land) {
+		Set<Cell> avail = new HashSet<>();
+		for (Cell c : toOccupy) {
+			Cell[] neighbors = c.neighbors();
+			// the cell can be a candidate for another new start if not occupied
+			for (int i = 0; i < neighbors.length; i++) {
+				Cell cc = neighbors[i];
+				if (land.unoccupied(cc)) {
 					avail.add(cc);
 				}
 			}
@@ -375,244 +305,37 @@ public class Player extends pentos.g0.Player{
 		avail.removeAll(toOccupy);
 		return avail;
 	}
-	/*
-	 * This can be the prototype of a utility function.
-	 * */
-	private int calculateScore(Set<Cell> start,Set<Cell> toOccupy,Set<Cell> avail){
-//		System.out.println(start.size()+" candidates before score calculation.");
-		//Calculate how many candidate cells this building plan occupies
-		Set<Cell> intersect=new HashSet<>();
-		intersect.addAll(start);
-		intersect.retainAll(toOccupy);
-		int score=intersect.size();
-		
-		//Calculate how many border cells this building plan occupies
-		intersect=new HashSet<>();
-		intersect.addAll(toOccupy);
-		intersect.retainAll(borders);
-//		System.out.println("The occupied border cells are:"+intersect);
-//		System.out.println("This plan will occupy "+intersect.size()+" border cells");
-		score+=intersect.size();
-		
-//		System.out.println("Covering "+score+" of existing start points.");
-//		System.out.println(start.size()+" candidates after score calculation.");
-		return score;
-	}
-	public Set<Cell> occupyCells(Action action){
-		Set<Cell> occupied=occupyCells(action.building,action.startPoint);
-		occupied.addAll(action.roadCells);
-		occupied.addAll(action.parkCells);
-		occupied.addAll(action.pondCells);
+
+	public Set<Cell> occupyCells(Action action) {
+		Set<Cell> occupied = action.getAbsoluteBuildingCells();
+		occupied.addAll(action.getRoadCells());
+		occupied.addAll(action.getParkCells());
+		occupied.addAll(action.getWaterCells());
 		return occupied;
 	}
-	private Set<Cell> occupyCells(Building building,Cell start){
-		Set<Cell> toOccupy=new HashSet<>();
-		Iterator<Cell> iter=building.iterator();
-		while(iter.hasNext()){
-			Cell c=iter.next();
-			Cell mapped=new Cell(c.i+start.i,c.j+start.j,Cell.Type.RESIDENCE);
+
+	public Set<Cell> occupyCells(Building building, Cell start) {
+		Set<Cell> toOccupy = new HashSet<>();
+		Iterator<Cell> iter = building.iterator();
+		while (iter.hasNext()) {
+			Cell c = iter.next();
+			Cell mapped = new Cell(c.i + start.i, c.j + start.j, Cell.Type.RESIDENCE);
 			toOccupy.add(mapped);
 		}
 		return toOccupy;
 	}
-	/* Obsolete */
-//	public Set<Cell> occupyCells(Building building,Cell start,Set<Cell> roads){
-//		Set<Cell> toOccupy=ToolBox.shiftCells(building, start);
-//		toOccupy.addAll(roads);
-//		
-//		return toOccupy;
-//	}
-	private void updateResidenceStart(Set<Cell> toOccupy,Set<Cell> avail){
+
+	public void updateResidenceStart(Set<Cell> toOccupy, Set<Cell> avail) {
 		residenceStart.removeAll(toOccupy);
 		residenceStart.addAll(avail);
 	}
-	private void updateFactoryStart(Set<Cell> toOccupy,Set<Cell> avail){
+
+	public void updateFactoryStart(Set<Cell> toOccupy, Set<Cell> avail) {
 		factoryStart.removeAll(toOccupy);
 		factoryStart.addAll(avail);
 	}
-	public static class ToolBox{
-			//Use reflection to get the bloody private field 
-			// throws IllegalArgumentException, IllegalAccessException, NoSuchFieldException, SecurityException
-			public static Cell.Type getCellType(Cell c){
-				try{
-					Field f = c.getClass().getDeclaredField("type"); //NoSuchFieldException
-					f.setAccessible(true);
-					Cell.Type iWantThis = (Cell.Type) f.get(c); //IllegalAccessException
-					return iWantThis;
-				}catch(Exception e){
-					System.out.println("Cannot get the field anyway. Return a default.");
-					return Cell.Type.FACTORY;
-				}
-			}
-
-			public static Set<Cell> getRoads(Land land){
-				try{
-					Field f = land.getClass().getDeclaredField("road_network"); //NoSuchFieldException
-					f.setAccessible(true);
-					@SuppressWarnings("unchecked")
-					Set<Cell> iWantThis = (Set<Cell>) f.get(land); //IllegalAccessException
-					return iWantThis;
-				}catch(Exception e){
-					System.out.println("Cannot get the roads anyway. Return a default.");
-					return new HashSet<Cell>();
-				}
-
-			}
-
-			/*
-			 * Shift cells to make it start from the offset.
-			 * */
-			public static Set<Cell> shiftCells(Building building,Cell start){
-				int len=building.size();
-				Cell[] shifted=new Cell[len];
-				Iterator<Cell> iter=building.iterator();
-				int i=0;
-				Cell.Type t=null;
-				while(iter.hasNext()){
-					Cell c=iter.next();
-					if(t==null){
-						t=getCellType(c);
-						//				System.out.println("Detected the cell is of type "+t);
-					}
-					shifted[i]=new Cell(c.i+start.i,c.j+start.j,t);
-					i++;
-				}
-
-				return new HashSet<Cell>(Arrays.asList(shifted));
-			}
-			/* The starting point is the bottom right corner.
-			 * The reaction is to just multiple the coord of each cell by -1 to make it a reflection.
-			 * */
-			public static Cell[] offsetBottomRight(Building building,Cell start){
-				Iterator<Cell> iter=building.iterator();
-				int len=building.size();
-				int i=0;
-				Cell[] reflected=new Cell[len];
-				Cell.Type t=null;
-				while(iter.hasNext()){
-					Cell c=iter.next();
-					if(t==null){
-						t=getCellType(c);
-						//				System.out.println("Detected the cell is of type "+t);
-					}
-					int row=start.i-c.i;
-					int col=start.j-c.j;
-					if(row<0||col<0)
-						return null;
-					reflected[i]=new Cell(row,col,t);
-					i++;
-				}
-				return reflected;
-			}
-			// build shortest sequence of road cells to connect to a set of cells b
-			public static Set<Cell> findShortestRoad(Set<Cell> b, Land land, Set<Cell> road_cells) {
-				Set<Cell> output = new HashSet<Cell>();
-				boolean[][] checked = new boolean[land.side][land.side];
-				Queue<Cell> queue = new LinkedList<Cell>();
-				// add border cells that don't have a road currently
-				Cell source = new Cell(Integer.MAX_VALUE,Integer.MAX_VALUE); // dummy cell to serve as road connector to perimeter cells
-				for (int z=0; z<land.side; z++) {
-					if (b.contains(new Cell(0,z)) || b.contains(new Cell(z,0)) || b.contains(new Cell(land.side-1,z)) || b.contains(new Cell(z,land.side-1))) //if already on border don't build any roads
-						return output;
-					if (land.unoccupied(0,z))
-						queue.add(new Cell(0,z,source));
-					if (land.unoccupied(z,0))
-						queue.add(new Cell(z,0,source));
-					if (land.unoccupied(z,land.side-1))
-						queue.add(new Cell(z,land.side-1,source));
-					if (land.unoccupied(land.side-1,z))
-						queue.add(new Cell(land.side-1,z,source));
-				}
-				// add cells adjacent to current road cells
-				for (Cell p : road_cells) {
-					for (Cell q : p.neighbors()) {
-						if (!road_cells.contains(q) && land.unoccupied(q) && !b.contains(q)) 
-							queue.add(new Cell(q.i,q.j,p)); // use tail field of cell to keep track of previous road cell during the search
-					}
-				}	
-				while (!queue.isEmpty()) {
-					Cell p = queue.remove();
-					checked[p.i][p.j] = true;
-					for (Cell x : p.neighbors()) {		
-						if (b.contains(x)) { // trace back through search tree to find path
-							Cell tail = p;
-							while (!b.contains(tail) && !road_cells.contains(tail) && !tail.equals(source)) {
-								output.add(new Cell(tail.i,tail.j));
-								tail = tail.previous;
-							}
-							if (!output.isEmpty())
-								return output;
-						}
-						else if (!checked[x.i][x.j] && land.unoccupied(x.i,x.j)) {
-							x.previous = p;
-							queue.add(x);	      
-						} 
-
-					}
-				}
-				if (output.isEmpty() && queue.isEmpty())
-					return null;
-				else
-					return output;
-			}
-			public static Cell findTopLeft(Cell[] cells){
-				int minRow=100;
-				int minCol=100;
-				Cell top=null;
-				Cell left=null;
-				for(int i=0;i<cells.length;i++){
-					Cell c=cells[i];
-					if(c.i<=minRow){
-						minRow=c.i;
-						top=c;
-					}
-					if(c.j<=minCol){
-						minCol=c.j;
-						left=c;
-					}
-				}
-				//		System.out.println("Found the top left cell "+minRow+","+minCol);
-				if(top.equals(left))
-					return top;
-				else{
-					System.out.println("Top cell is not left cell in a rectangle! Top:"+top+" Left:"+left);
-					return null;
-				}
-			}
-			public static void lookToTopLeft(Cell[] cells,Cell topLeft){
-				if(cells.length==0)
-					return;
-				Cell.Type t=getCellType(cells[0]);
-				for(int k=0;k<cells.length;k++){
-					Cell c=cells[k];
-					Cell n=new Cell(c.i-topLeft.i,c.j-topLeft.j,t);
-					cells[k]=n;
-				}
-			}
-			public static boolean compareBuildings(Building a,Building b){
-				Set<Cell> aCells=getBuildingCells(a);
-				Set<Cell> bCells=getBuildingCells(b);
-				return aCells.containsAll(bCells)&&bCells.containsAll(aCells);
-			}
-			public static Set<Cell> getBuildingCells(Building b){
-				Iterator<Cell> iter=b.iterator();
-				Set<Cell> cells=new HashSet<>();
-				while(iter.hasNext()){
-					cells.add(iter.next());
-				}
-				return cells;
-			}
-			public static Set<Cell> copyLandRoads(Land land){
-				try{
-					//Copy the set of road cells
-					Set<Cell> landRoads=getRoads(land);
-					Set<Cell> copyRoads=new HashSet<>();
-					copyRoads.addAll(landRoads);
-					return copyRoads;
-				}catch(Exception e){
-					System.out.println("Cannot copy road network");
-					return new HashSet<>();
-				}
-			}
-	}
+	public void updateFactoryRows(int row, int value)
+    {
+        factoryRows[row] = value;
+    }
 }

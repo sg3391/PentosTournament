@@ -4,6 +4,8 @@ import java.util.*;
 
 import pentos.sim.Land;
 import pentos.sim.Cell;
+import pentos.sim.Building;
+import pentos.g5.Player;
 
 public class LandUtil {
 
@@ -12,139 +14,181 @@ public class LandUtil {
     public Land land;
     public int lastLoopLevel;
 
+    public Pair returnPair;
+    public int returnRotation;
+
     public LandUtil(Land l) {
         land = l;
     }
 
-    public Pair getDiag(BuildingUtil bu, Direction dir, Set<Pair> rejects) {
-
-        Pair[] buildingHull = bu.Hull();
-
-        int numLoops = land.side - 1;
-        Looper looper;
-        looper = new Looper(0, numLoops*2, 1);
-
-        int loop;
-        while(looper.hasNext()) {
-            loop = looper.next();
-            lastLoopLevel = loop;
-
-            if (loop <= numLoops) {
-                int i = loop;
-                int j = 0;
-                for (; j <= loop; j++) {
-                    i = loop - j;
-                    int actualI;
-                    int actualJ;
-                    if (dir == Direction.OUTWARDS) {
-                        // finding cell that factory would be placed on
-                        actualI = numLoops - i - buildingHull[1].i;
-                        actualJ = numLoops - j - buildingHull[1].j;
-                    } else {
-                        actualI = i;
-                        actualJ = j;
-                    }
-                    if (actualI < 0 || actualJ < 0)
-                        continue;
-                    Pair loc = new Pair(actualI, actualJ);
-                    if (!rejects.contains(loc) && land.buildable(bu.building, new Cell(actualI,actualJ))) {
-                        return loc;
-                    }
-                }
-            }
-            else {
-                int i = numLoops;
-                int j = loop - numLoops;
-                for (; j <= numLoops; j++) {
-                    i = loop - j;
-                    int actualI;
-                    int actualJ;
-                    if (dir == Direction.OUTWARDS) {
-                        // finding cell that factory would be placed on
-                        actualI = numLoops - i - buildingHull[1].i;
-                        actualJ = numLoops - j - buildingHull[1].j;
-                    } else {
-                        actualI = i;
-                        actualJ = j;
-                    }
-                    if (actualI < 0 || actualJ < 0)
-                        continue;
-                    Pair loc = new Pair(actualI, actualJ);
-                    if ((!rejects.contains(loc) && land.buildable(bu.building, new Cell(actualI,actualJ)))) {
-                        return loc;
-                    }
-                }
-            }
+    private class SearchSpace {
+        public Pair pair;
+        public Integer rotation;
+        public SearchSpace(Pair p, Integer r) {
+            this.pair = p;
+            this.rotation = r;
         }
-        return new Pair(-1, -1);
     }
 
-    public Pair getCup(BuildingUtil bu, Direction dir, Set<Pair> rejects) {
+    public boolean searchOptimalPlacement(BuildingUtil bu, Direction dir, Set<Pair> rejects, Player.Strategy strategy) {
+
+        int count = 0;
 
         Pair[] buildingHull = bu.Hull();
+        Pair size = new Pair(land.side, land.side);
+        // size.subtract( buildingHull[1] );
 
-        int numLoops = (land.side+1) / 2;
-        int maxI = land.side - buildingHull[1].i;
-        int maxJ = land.side - buildingHull[1].j;
-        int midI = (int) Math.ceil(maxI / 2.0);
+        MinAndArgMin<SearchSpace> smoothnessSpace = new MinAndArgMin<SearchSpace> ();
 
-        Looper looper;
-        if( LandUtil.Direction.OUTWARDS == dir ) {
-            looper = new Looper(numLoops-1, 0, -1);
+
+        // MinAndArgMin<Pair> indexWiseLocations = new MinAndArgMin<Pair>();
+        // MinAndArgMin<Integer> indexWiseRotations = new MinAndArgMin<Integer>();
+
+        // MinAndArgMin<Pair> smoothnessWiseLocations = new MinAndArgMin<Pair>();
+        // MinAndArgMin<Integer> smoothnessWiseRotations = new MinAndArgMin<Integer>();
+
+        // MinAndArgMin<Pair> roadnessWiseLocations = new MinAndArgMin<Pair>();
+        // MinAndArgMin<Integer> roadnessWiseRotations = new MinAndArgMin<Integer>();
+
+        Building[] rotations = null;
+        // Building r = null;
+
+        List<Pair> allPairs;
+
+        if(strategy == Player.Strategy.SPIRAL) {
+            int minSide = Math.min(buildingHull[1].i, buildingHull[1].j);
+            allPairs = Looper2D.getSpiral( size.i - minSide, size.j - minSide, dir==Direction.OUTWARDS );
+        } else if(strategy == Player.Strategy.CORNERS) {
+            allPairs = Looper2D.getCorner( size.i, size.j, dir==Direction.OUTWARDS );
         } else {
-            looper = new Looper(0, numLoops-1, 1);
+            allPairs = Looper2D.getBlocks( size.i, size.j, dir==Direction.OUTWARDS );
         }
 
-        // for(int loop=0; loop < numLoops ; ++loop ) {
-        int loop;
-        while(looper.hasNext()) {
-            loop = looper.next();
-            lastLoopLevel = loop;
-
-            // DEBUG System.err.println("Trying to build at level: "+loop);
-            int i = midI-(buildingHull[1].i+1);
-            int j = loop;
-            for(; i > loop; --i) {
-                // System.out.println(new Pair(i,j));
-                Pair loc = new Pair(i, j);
-                if((!rejects.contains(loc) && land.buildable( bu.building, new Cell(i,j)))) {
-                    return loc;
-                }
-            }
-            assert (i == loop);
-            assert (j == loop);
-            for(; j< maxJ - loop; ++j) {
-                // System.out.println(new Pair(i,j));
-                Pair loc = new Pair(i, j);
-                if((!rejects.contains(loc) && land.buildable( bu.building, new Cell(i,j)))) {
-                    return loc;
-                }
-            }   // Traverse all in the top row
-            for(; i< maxI - loop; ++i) {
-                // System.out.println(new Pair(i,j));
-                Pair loc = new Pair(i, j);
-                if((!rejects.contains(loc) && land.buildable( bu.building, new Cell(i,j)))) {
-                    return loc;
-                }
-            }   // Traverse all in the left column
-            for(; j>loop; --j) {
-                // System.out.println(new Pair(i,j));
-                Pair loc = new Pair(i, j);
-                if((!rejects.contains(loc) && land.buildable( bu.building, new Cell(i,j)))) {
-                    return loc;
-                }
-            }
-            assert (i == maxI-loop);
-            assert (j == loop);
-            for(; i > midI; --i) {
-                // System.out.println(new Pair(i,j));
-                Pair loc = new Pair(i, j);
-                if((!rejects.contains(loc) && land.buildable( bu.building, new Cell(i,j)))) {
-                    return loc;
+        // for( Pair p : Looper2D.getSpiral( size.i, size.j, dir==Direction.OUTWARDS )) {
+        for(Pair p : allPairs) {
+            rotations = bu.building.rotations();
+            for( int r=0; r < rotations.length; ++r ) {
+                if(!rejects.contains(p) && land.buildable(rotations[r], new Cell(p.i, p.j)) ) {
+                    // int smoothScore = this.smoothness(rotations[r], p);
+                    int smoothScore = this.smoothness(rotations[r], p);
+                    smoothnessSpace.consider(smoothScore, new SearchSpace(p, r));
+                    // DEBUG System.out.println("smooth score = " + smoothScore + " for rotation " + r);
+                    // smoothnessWiseLocations.consider(smoothScore, p);
+                    // smoothnessWiseRotations.consider(smoothScore, r);
+                    // roadnessWiseLocations.consider(roadConnectedness, p);
+                    // roadnessWiseRotations.consider(roadConnectedness, r);
+                    // indexWiseLocations.consider( count, p);
+                    // indexWiseRotations.consider( count, r);
                 }
             }
         }
-        return new Pair(-1,-1);
+
+        // if(smoothnessWiseLocations.idxMin >= 0){
+        //     returnPair = smoothnessWiseLocations.argMin;
+        //     returnRotation = smoothnessWiseRotations.argMin;
+        //     return true;
+        // }
+
+        if( smoothnessSpace.idxMin >= 0 ) {
+            returnPair = smoothnessSpace.argMin.pair;
+            returnRotation = smoothnessSpace.argMin.rotation;
+
+            // MinAndArgMin<SearchSpace> roadnessSpace = new MinAndArgMin<SearchSpace> ();
+
+            // for( SearchSpace s : smoothnessSpace.argsMin ) {
+            //     int smoothScore = this.smoothness(rotations[s.rotation], s.pair);
+            //     // int roadConnectedness = this.roadness(rotations[s.rotation], s.pair);
+            //     roadnessSpace.consider(smoothScore, s);
+            // }
+
+            // if( roadnessSpace.idxMin >= 0 ) {
+            //     returnPair = roadnessSpace.argMin.pair;
+            //     returnRotation = roadnessSpace.argMin.rotation;
+            //     return true;
+            // }
+
+            return true;
+
+        }
+        return false;
+    }
+
+    private int smoothness(Building bu, Pair p) {
+        // for (Cell q : bu) {
+        //     if (!this.land.unoccupied(p.i + q.i, p.j + q.j))
+        //         return -1;
+        //     else
+        //         q = new Cell(p.i + q.i, p.j + q.j, (Type) bu.getType());
+        // }
+        Iterator<Cell> iter = bu.iterator();
+        Set<Cell> buildingCells = new HashSet<Cell>();
+        while (iter.hasNext()) {
+            Cell bCell = iter.next();
+            buildingCells.add(new Cell(bCell.i + p.i, bCell.j + p.j));
+        }
+
+        int score = 0;
+        for (int i = 0 ; i < land.side ; i++) {
+    	    for (int j = 0 ; j < land.side ; j++) {
+    		    Cell curr = new Cell(i, j);
+
+                if (buildingCells.contains(curr)) {
+                    Cell[] neighbors = curr.neighbors();
+                    for (Cell neighbor : neighbors) {
+                        if (!buildingCells.contains(neighbor)) {
+                            if (neighbor.isEmpty()) {
+                                score++;
+                            }
+                        }
+                    }
+                } else if (!this.land.unoccupied(curr)) {
+                    Cell[] neighbors = curr.neighbors();
+                    for (Cell neighbor : neighbors) {
+                        if (neighbor.isEmpty() && !buildingCells.contains(neighbor)) {
+                            score++;
+                        }
+                    }
+                }
+    	    }
+        }
+        return score;
+    }
+    
+    private int roadness(Building bu, Pair p) {
+        
+        Iterator<Cell> iter = bu.iterator();
+        Set<Cell> buildingCells = new HashSet<Cell>();
+        while (iter.hasNext()) {
+            Cell bCell = iter.next();
+            buildingCells.add(new Cell(bCell.i + p.i, bCell.j + p.j));
+        }
+
+        int score = 0;
+        for (int i = 0 ; i < land.side ; i++) {
+    	    for (int j = 0 ; j < land.side ; j++) {
+    		    Cell curr = new Cell(i, j);
+
+                if (buildingCells.contains(curr)) {
+                    Cell[] neighbors = curr.neighbors();
+                    for (Cell neighbor : neighbors) {
+                        if (!buildingCells.contains(neighbor)) {
+                            if (neighbor.isRoad()) {
+                                score++;
+                            }
+                        }
+                    }
+                }
+                // } else if (!this.land.unoccupied(curr)) {
+                //     Cell[] neighbors = curr.neighbors();
+                //     for (Cell neighbor : neighbors) {
+                //         if (neighbor.isEmpty() && !buildingCells.contains(neighbor)) {
+                //             score++;
+                //         }
+                //     }
+                // }
+    	    }
+        }
+        return score;
     }
 
 }

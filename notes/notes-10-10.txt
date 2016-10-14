@@ -1,0 +1,7 @@
+Zeynap: nxn factories do not pack well when using the shortest path road algorithm even though they seem favorable to packing
+
+Bruce: preallocating strategies can achieve higher scores over favorable distributions than purely online strategies but are more vulnerable to adversarial distributions
+
+Kailash: we should not do any numerical statistic over scores over different distributions
+
+highest possible score seems to be in the neighborhood of 2400-2500

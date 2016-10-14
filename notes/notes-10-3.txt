@@ -1,0 +1,11 @@
+Adam: detect unoccupied space inaccessible by roads and avoid moves which create such space
+
+Yishwan: treat parks/ponds as buildings and try to pack them tightly
+(versus making parks/ponds stick out to maximize surface area)
+
+g9: gaps of 8 cells seems to work best for a nice random distribution
+
+horizontal roads with vertical parks/ponds might work better for symmetric shapes rather than horizontal everything
+
+Tian: detect from history what the distribution is
+
