@@ -29,6 +29,7 @@ public class Sequencer implements pentos.sim.Sequencer {
     private int i=0;
     
     public void init (Long seed) {
+		seed = Long.valueOf(182);
 		if (seed != null) 
 			gen = new Random(seed.longValue());
 		else

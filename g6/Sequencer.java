@@ -21,7 +21,8 @@ public class Sequencer implements pentos.sim.Sequencer {
 	private double threshold = 0.0;
 	
 	@Override
-	public void init(Long seed) {
+	public void init(Long seed ) {
+		seed = Long.valueOf(182);
 		if (seed != null)
 			rand = new Random(seed);
 		else
